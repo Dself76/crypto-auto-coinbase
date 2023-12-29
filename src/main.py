@@ -10,6 +10,8 @@ import pandas as pd
 import os
 
 
+def rate_limiter():
+    time.sleep(1)  # Adjust the duration based on the API's rate limit it should be 30
 
 # Configure logging to write to a file
 logging.basicConfig(filename='bot_log.txt', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -86,6 +88,23 @@ def fetch_current_price_data(product_id):
         logging.error(f"Error fetching current price for {product_id}: {e}")
         return None
 
+def fetch_last_checked_price(product_id):
+    try:
+        # Read the historical data CSV file
+        historical_data = pd.read_csv('historical_data.csv')
+
+        # Filter the data for the given product_id and get the most recent entry
+        filtered_data = historical_data[historical_data['product_id'] == product_id]
+        if not filtered_data.empty:
+            last_checked_price = filtered_data.iloc[-1]['close']  # Assuming 'close' column has the last price
+            return last_checked_price
+        else:
+            return 0  # Return a default value if no data is found for the product_id
+    except FileNotFoundError:
+        return 0  # Return a default value if the file does not exist
+    except Exception as e:
+        logging.error(f"Error fetching last checked price for {product_id}: {e}")
+        return 0
 
 
 
@@ -128,7 +147,7 @@ def check_and_execute_buy(product_id, last_checked_price):
         now = datetime.now()
 
         # Checking buy conditions
-        # You may adjust or add more conditions as needed
+        #  adjust or add more conditions here when it gets running, keep it basic for now
         is_buy_condition_met = False
 
         # Condition 1: 10% increase over the past 2 hours
@@ -164,7 +183,7 @@ def check_and_execute_buy(product_id, last_checked_price):
             buy_order_data = {
                 'type': 'market',
                 'product_id': product_id,
-                'funds': 'FIAT_AMOUNT_TO_SPEND'  # Replace with the fiat amount you want to spend
+                'funds': 'FIAT_AMOUNT_TO_SPEND'  # Replace with the fiat amount we will want to spend
             }
 
             endpoint = '/orders'
@@ -206,9 +225,12 @@ def check_and_execute_buy(product_id, last_checked_price):
 
 
 
-def check_sell_condition(product_id, purchase_price, highest_price, previous_price, purchase_time):
-    current_data = fetch_current_price_data(product_id)  # Implement this function to get the current price
-    if current_data.empty:
+def check_and_execute_sell_order(product_id, purchase_price, highest_price, previous_price, purchase_time):
+    global held_crypto, owned_crypto
+
+    current_data = fetch_current_price_data(product_id)  # Ensure this function is implemented to get the current price
+    if current_data.empty or not owned_crypto or not held_crypto:
+        logging.info("No data to check sell condition or no cryptocurrency currently held to sell.")
         return False
 
     current_price = current_data['price']
@@ -218,60 +240,52 @@ def check_sell_condition(product_id, purchase_price, highest_price, previous_pri
 
     # Check the selling conditions
     if price_drop_from_previous <= -5 or price_drop_from_highest <= -5 or price_gain_from_purchase >= 25:
-        return True
-    return False
+        # Execute sell order if conditions are met
+        amount_to_sell = held_crypto['amount']  # Amount of cryptocurrency to sell
 
-def execute_sell_order():
-    global held_crypto, owned_crypto
-
-    # Check if there's any cryptocurrency held
-    if not owned_crypto or not held_crypto:
-        logging.info("No cryptocurrency currently held to sell.")
-        return
-
-    product_id = held_crypto['product_id']
-    amount_to_sell = held_crypto['amount']  # Amount of cryptocurrency to sell
-
-    try:
-        sell_order_data = {
-            'type': 'market',
-            'product_id': product_id,
-            'size': str(amount_to_sell)
-        }
-        endpoint = '/orders'
-        body = json.dumps(sell_order_data)
-        headers = create_request_headers(endpoint, 'POST', body)
-        response = requests.post(API_URL + endpoint, headers=headers, data=body)
-
-        if response.status_code == 200:
-            response_data = response.json()
-            logging.info(f"Successfully executed sell order for {product_id}: Sold {amount_to_sell} units.")
-
-            # Append order details to CSV
-            order_details_df = pd.DataFrame([{
+        try:
+            sell_order_data = {
+                'type': 'market',
                 'product_id': product_id,
-                'amount_sold': amount_to_sell,
-                'time': datetime.now(),
-                # Include other relevant details from response_data if needed
-            }])
-            append_to_csv(order_details_df, 'sell_orders.csv')
+                'size': str(amount_to_sell)
+            }
+            endpoint = '/orders'
+            body = json.dumps(sell_order_data)
+            headers = create_request_headers(endpoint, 'POST', body)
+            response = requests.post(API_URL + endpoint, headers=headers, data=body)
 
-            # Resetting owned_crypto and held_crypto after successful sell
-            owned_crypto = False
-            held_crypto = None
-        else:
-            logging.warning(f"Failed to execute sell order for {product_id}: {response.status_code}, Response: {response.text}")
-    except Exception as e:
-        logging.error(f"Error executing sell order for {product_id}: {e}")
+            if response.status_code == 200:
+                response_data = response.json()
+                logging.info(f"Successfully executed sell order for {product_id}: Sold {amount_to_sell} units.")
 
-def rate_limiter():
-    """
-    Ensures that the requests do not exceed 20 per second. limit is 30 but this is safe
-    """
-    time.sleep(1 / 20)
+                # Append order details to CSV
+                order_details_df = pd.DataFrame([{
+                    'product_id': product_id,
+                    'amount_sold': amount_to_sell,
+                    'sell_price': current_price,  # Assuming you want to record the sell price
+                    'time': datetime.now(),
+                    # Include other relevant details from response_data if and when needed
+                }])
+                append_to_csv(order_details_df, 'sell_orders.csv')
+
+                # Resetting owned_crypto and held_crypto after successful sell
+                owned_crypto = False
+                held_crypto = None
+                return True
+            else:
+                logging.warning(f"Failed to execute sell order for {product_id}: {response.status_code}, Response: {response.text}")
+                return False
+        except Exception as e:
+            logging.error(f"Error executing sell order for {product_id}: {e}")
+            return False
+    else:
+        logging.info("Sell conditions not met.")
+        return False
+
 def main():
     global owned_crypto, held_crypto
     highest_price = 0  # Initialize the highest price
+    previous_price = 0  # Initialize the previous price
     while True:
         try:
             current_time = datetime.now()
@@ -281,26 +295,25 @@ def main():
                 available_products = get_available_products()
                 for product_id in available_products:
                     rate_limiter()  # Apply rate limiting here
-                    if check_buy_condition(product_id):
-                        execute_buy_order(product_id)
+                    last_checked_price = fetch_last_checked_price(product_id)  # You need to define this
+                    if check_and_execute_buy(product_id, last_checked_price):
                         owned_crypto = True
-                        held_crypto = {'product_id': product_id, 'purchase_price': purchase_price, 'time': current_time}
                         break  # Exit the loop after buying a cryptocurrency
 
             # Update the highest price and check sell condition for the owned cryptocurrency
             if owned_crypto and held_crypto:
                 rate_limiter()  # Apply rate limiting here
                 current_data = fetch_current_price_data(held_crypto['product_id'])
-                if not current_data.empty and current_data['price'] > highest_price:
-                    highest_price = current_data['price']
+                if not current_data.empty:
+                    current_price = current_data['price']
+                    highest_price = max(highest_price, current_price)
+                    if check_and_execute_sell_order(held_crypto['product_id'], held_crypto['purchase_price'], highest_price, previous_price, held_crypto['time']):
+                        owned_crypto = False
+                        held_crypto = None
+                        highest_price = 0  # Reset the highest price
+                    previous_price = current_price
 
-                if check_sell_condition(held_crypto['product_id'], held_crypto['purchase_price'], highest_price, held_crypto['time']):
-                    execute_sell_order(held_crypto['product_id'])
-                    owned_crypto = False
-                    held_crypto = None
-                    highest_price = 0  # Reset the highest price
-
-            time.sleep(1)  # Sleep to avoid to much CPU usage and hitting rate limits
+            time.sleep(1)  # Sleep to avoid too much CPU usage and hitting rate limits
 
         except Exception as e:
             logging.error(f"Error in main loop: {e}")
