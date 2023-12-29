@@ -166,7 +166,7 @@ def execute_buy_order(product_id):
         buy_order_data = {
             'type': 'market',  # Market order
             'product_id': product_id,
-            'funds': 'YOUR_FIAT_AMOUNT_TO_SPEND'  # Replace with the fiat amount you want to spend
+            'funds': 'FIAT_AMOUNT_TO_SPEND'  # Replace with the fiat amount you want to spend
         }
 
         endpoint = '/orders'
