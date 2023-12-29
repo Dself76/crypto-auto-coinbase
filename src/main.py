@@ -14,10 +14,10 @@ import os
 # Configure logging to write to a file
 logging.basicConfig(filename='bot_log.txt', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Replace with your Coinbase Pro API credentials
-API_KEY = 'YOUR_API_KEY'
-API_SECRET = 'YOUR_API_SECRET'
-API_PASSPHRASE = 'YOUR_API_PASSPHRASE'
+# Replace with  Coinbase Pro API creds when ready after mock test passes
+API_KEY = 'API_KEY'
+API_SECRET = 'API_SECRET'
+API_PASSPHRASE = 'API_PASSPHRASE'
 
 # Coinbase Pro API endpoints
 API_URL = 'https://api.pro.coinbase.com'
@@ -123,87 +123,86 @@ def append_to_csv(data, file_name):
         logging.error(f"Error appending data to CSV: {e}")
 
 
-def check_buy_condition(product_id, last_checked_price):
+def check_and_execute_buy(product_id, last_checked_price):
     try:
         now = datetime.now()
 
-        # Condition 1: Check for a 10% increase over the past 2 hours
+        # Checking buy conditions
+        # You may adjust or add more conditions as needed
+        is_buy_condition_met = False
+
+        # Condition 1: 10% increase over the past 2 hours
         start_time_2h = now - timedelta(hours=2)
         historical_data_2h = fetch_historical_data(product_id, start_time_2h, now)
         if not historical_data_2h.empty:
             price_increase_2h = (historical_data_2h['close'].iloc[-1] - historical_data_2h['open'].iloc[0]) / \
                                 historical_data_2h['open'].iloc[0] * 100
             if price_increase_2h >= 10:
-                return True
+                is_buy_condition_met = True
 
-        # Condition 2: Check for a 10% increase over the past 1 hour
+        # Condition 2: 10% increase over the past 1 hour
         start_time_1h = now - timedelta(hours=1)
         historical_data_1h = fetch_historical_data(product_id, start_time_1h, now)
         if not historical_data_1h.empty:
             price_increase_1h = (historical_data_1h['close'].iloc[-1] - historical_data_1h['open'].iloc[0]) / \
                                 historical_data_1h['open'].iloc[0] * 100
             if price_increase_1h >= 10:
-                return True
+                is_buy_condition_met = True
 
-        # Condition 3: Check for a 5% increase since the last API call
-        current_price = fetch_current_price_data(product_id)  # Make sure this function is defined in your code
+        # Condition 3: 5% increase since the last API call
+        current_price = fetch_current_price_data(product_id)
         if current_price is not None and last_checked_price is not None:
             price_increase_since_last_check = (current_price - last_checked_price) / last_checked_price * 100
             if price_increase_since_last_check >= 5:
-                return True
+                is_buy_condition_met = True
 
-    except Exception as e:
-        logging.error(f"An error occurred in check_buy_condition for {product_id}: {e}")
-
-    return False
-
-def execute_buy_order(product_id):
-    global held_crypto, owned_crypto
-
-    try:
-        # Define the amount to buy or the funds to use
-
-        buy_order_data = {
-            'type': 'market',  # Market order
-            'product_id': product_id,
-            'funds': 'FIAT_AMOUNT_TO_SPEND'  # Replace with the fiat amount you want to spend
-        }
-
-        endpoint = '/orders'
-        body = json.dumps(buy_order_data)
-        headers = create_request_headers(endpoint, 'POST', body)
-        response = requests.post(API_URL + endpoint, headers=headers, data=body)
-
-        if response.status_code == 200:
-            response_data = response.json()
-            # Assuming response contains the amount of crypto bought
-            amount_bought = response_data['filled_size']
-            purchase_price = response_data['executed_value'] / amount_bought
-
-            # Update held_crypto
-            held_crypto = {
+        # If any buy condition is met, execute buy order
+        if is_buy_condition_met:
+            global held_crypto, owned_crypto
+            # Execute buy order logic
+            # Define the amount to buy or the funds to use
+            buy_order_data = {
+                'type': 'market',
                 'product_id': product_id,
-                'purchase_price': purchase_price,
-                'amount': amount_bought,
-                'time': datetime.now()
+                'funds': 'FIAT_AMOUNT_TO_SPEND'  # Replace with the fiat amount you want to spend
             }
 
-            # Append order details to CSV
-            order_details_df = pd.DataFrame([{
-                'product_id': product_id,
-                'purchase_price': purchase_price,
-                'amount_bought': amount_bought,
-                'time': datetime.now()
-            }])
-            append_to_csv(order_details_df, 'buy_orders.csv')
+            endpoint = '/orders'
+            body = json.dumps(buy_order_data)
+            headers = create_request_headers(endpoint, 'POST', body)
+            response = requests.post(API_URL + endpoint, headers=headers, data=body)
 
-            logging.info(f"Successfully executed buy order for {product_id}: Bought {amount_bought} units at {purchase_price} each.")
-        else:
-            logging.warning(f"Failed to execute buy order for {product_id}: {response.status_code}, Response: {response.text}")
+            if response.status_code == 200:
+                response_data = response.json()
+                # Assuming response contains the amount of crypto bought
+                amount_bought = response_data['filled_size']
+                purchase_price = response_data['executed_value'] / amount_bought
+
+                # Update held_crypto
+                held_crypto = {
+                    'product_id': product_id,
+                    'purchase_price': purchase_price,
+                    'amount': amount_bought,
+                    'time': datetime.now()
+                }
+
+                # Append order details to CSV
+                order_details_df = pd.DataFrame([{
+                    'product_id': product_id,
+                    'purchase_price': purchase_price,
+                    'amount_bought': amount_bought,
+                    'time': datetime.now()
+                }])
+                append_to_csv(order_details_df, 'buy_orders.csv')
+
+                logging.info(f"Successfully executed buy order for {product_id}: Bought {amount_bought} units at {purchase_price} each.")
+            else:
+                logging.warning(f"Failed to execute buy order for {product_id}: {response.status_code}, Response: {response.text}")
 
     except Exception as e:
-        logging.error(f"Error executing buy order for {product_id}: {e}")
+        logging.error(f"An error occurred: {e}")
 
+    return False
 
 
 
