@@ -93,6 +93,33 @@ def test_get_available_products_success(self, mock_get):
     self.assertIn('BTC-USD', available_products)
     self.assertNotIn('ETH-USD', available_products)  # ETH-USD should not be in the list because trading is disabled
 
+@patch('src.main.requests.post')
+@patch('src.main.fetch_current_price_data')
+@patch('src.main.fetch_historical_data')
+gitdef test_check_and_execute_buy(self, mock_fetch_historical, mock_fetch_current, mock_post):
+        # Setup mock responses
+        mock_fetch_historical.return_value = pd.DataFrame({'open': [44000], 'close': [50000]})
+        mock_fetch_current.return_value = 51000.0
+
+        # Mock response for the POST request to execute buy order
+        mock_post_response = MagicMock()
+        mock_post_response.status_code = 200
+        mock_post_response.json.return_value = {'filled_size': 1.0, 'executed_value': 51000.0}
+        mock_post.return_value = mock_post_response
+
+        # Run the function with test data
+        product_id = 'BTC-USD'
+        last_checked_price = 45000.0
+        result = check_and_execute_buy(product_id, last_checked_price)
+
+        # Assertions
+        mock_fetch_historical.assert_called_with(product_id, ANY, ANY, ANY)  # Replace ANY with appropriate arguments if needed
+        mock_fetch_current.assert_called_with(product_id)
+        mock_post.assert_called()
+
+        # Assert based on your function's logic and return value
+        # Update this assertion based on what your function returns or should return
+        self.assertFalse(result)
 
 
 if __name__ == '__main__':
